@@ -1,0 +1,77 @@
+# Portainer standalone stack — Horizon Fleet control plane (lab)
+# Edge: http://172.16.100.81:18080
+# Requires local image: horizon-control-api:lab
+
+services:
+  caddy:
+    image: caddy:2.8-alpine
+    ports:
+      - "18080:80"
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        cat > /etc/caddy/Caddyfile <<'EOF'
+        {
+          auto_https off
+        }
+        :80 {
+          handle /api/v1/agent/* {
+            reverse_proxy control-api:8080
+          }
+          handle /hubs/agent* {
+            reverse_proxy control-api:8080
+          }
+          handle /swagger* {
+            reverse_proxy control-api:8080
+          }
+          handle /api/v1/admin* {
+            reverse_proxy control-api:8080
+          }
+          handle /health {
+            reverse_proxy control-api:8080
+          }
+          handle {
+            respond "Horizon Fleet Control edge (Portainer lab)" 200
+          }
+        }
+        EOF
+        exec caddy run --config /etc/caddy/Caddyfile --adapter caddyfile
+    volumes:
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - control-api
+    restart: unless-stopped
+
+  control-api:
+    image: horizon-control-api:lab
+    environment:
+      ASPNETCORE_URLS: http://0.0.0.0:8080
+      ASPNETCORE_ENVIRONMENT: Production
+      ConnectionStrings__Default: Host=postgres;Port=5432;Database=horizon_fleet;Username=horizon;Password=horizon_lab
+      FleetControl__AdminApiKey: lab-admin-key-change-me
+      FleetControl__LabEnrollmentToken: lab-enroll-token-change-me
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: horizon_fleet
+      POSTGRES_USER: horizon
+      POSTGRES_PASSWORD: horizon_lab
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U horizon -d horizon_fleet"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+    restart: unless-stopped
+
+volumes:
+  pgdata:
+  caddy_data:
+  caddy_config:
