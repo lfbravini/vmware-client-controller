@@ -1,0 +1,13 @@
+---
+description: React admin GUI conventions for HorizonControl.Web
+globs: src/HorizonControl.Web/**
+alwaysApply: false
+---
+
+# HorizonControl.Web
+
+- Stack: React 18 + TypeScript **strict** + TailwindCSS + TanStack Query + `@microsoft/signalr`.
+- Always scope UI data by the active tenant from the tenant switcher; never hardcode or trust a client-picked tenant id in API calls without auth context.
+- Use TanStack Query for REST reads/mutations; SignalR for live endpoint/instance presence and command feedback.
+- Prefer focused screens (fleet list, instance drill-down, policy editor) over large dashboard clutter in early slices.
+- After changes: `npm run typecheck` (or `tsc --noEmit`) and `npm run build`.

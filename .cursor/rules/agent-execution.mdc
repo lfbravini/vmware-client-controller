@@ -1,0 +1,28 @@
+---
+description: Contract-first workflow, vertical slices, and mandatory build verification
+alwaysApply: true
+---
+
+# Agent Execution Guardrails
+
+## Contract-first
+- Before any endpoint, SignalR method, Named Pipe message, or DB query: inspect `src/HorizonControl.Shared` and the master spec.
+- If a DTO/contract is missing, add it in `HorizonControl.Shared` first, `dotnet build`, then implement producers/consumers.
+
+## OS boundary
+- `HorizonControl.Api` / `HorizonControl.Shared`: Linux-safe `net8.0` only — no Win32 P/Invoke, `System.Windows.*`, DirectoryServices, or DPAPI.
+- Win32 / DPAPI only in `HorizonWatchdog.Service`, `.Tray`, `.Updater` (`net8.0-windows`).
+
+## Iteration
+- One cohesive vertical slice per turn (e.g. Shared DTO → migration → API → test). Verify build before expanding.
+- No unsolicited refactors; minimal diffs.
+- No stubs / `NotImplementedException` / mock data in production handlers, P/Invoke wrappers, or security middleware.
+
+## Verification before concluding
+- C#: `dotnet build` on affected project/solution; fix nullability (`CS86xx`) and fire-and-forget async (`CS4014`).
+- Web: `npm run typecheck` (or `tsc --noEmit`) and `npm run build`.
+- Deploy: `docker compose config` / `caddy validate` when those files change.
+
+## Cross-cutting engineering
+- Network calls: `CancellationToken` timeouts, exponential backoff with jitter, offline/fallback behavior.
+- Logging: `ILogger<T>` structured templates only — never `Console.WriteLine` in production services.

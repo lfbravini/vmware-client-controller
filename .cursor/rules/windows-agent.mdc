@@ -1,0 +1,16 @@
+---
+description: Windows Watchdog Service/Tray/Updater Win32 and security rules
+globs: src/HorizonWatchdog.*/**
+alwaysApply: false
+---
+
+# Windows Agent (Service / Tray / Updater)
+
+- Target `net8.0-windows`. Service = Session 0 `LocalSystem`; Tray = interactive user session; Updater = OTA binary swapper.
+- IPC only via ACL-secured Named Pipe `\\.\pipe\HorizonWatchdogIPC` with length-prefixed JSON frames (Shared contracts).
+- **P/Invoke safety:** Check return values + `Marshal.GetLastWin32Error()` on Job Object / process / `SendMessageTimeout` APIs. Wrap native handles in `SafeHandle` — never leak raw `IntPtr`.
+- **Hang detection:** `SendMessageTimeout(WM_NULL, SMTO_ABORTIFHUNG, 2000)`. Require **3 consecutive failures** over policy `hang_threshold_sec` before remediation.
+- **Credentials:** Never relaunch Horizon Client with `-password`. Use Credential Manager, cached broker URL/username, or `-logInAsCurrentUser`.
+- Store `agent_secret` with DPAPI `DataProtectionScope.LocalMachine`. Cache OU policy under `%ProgramData%\HorizonWatchdog\policy.json` for offline healing.
+- **RustDesk:** Stopped by default; on `START_REMOTE_ASSIST` use tenant relay keys + 12-char OTP; tear down and rotate on disconnect or TTL.
+- **OTA:** Verify SHA-256 (and Authenticode when available); Service must not overwrite its own locked binaries — spawn `HorizonWatchdog.Updater.exe`.

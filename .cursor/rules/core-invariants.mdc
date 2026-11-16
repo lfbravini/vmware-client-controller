@@ -1,0 +1,14 @@
+---
+description: Horizon fleet control core domain invariants (tenancy, Job Objects, Virtual OUs)
+alwaysApply: true
+---
+
+# Core Domain Invariants
+
+- **Ecosystem:** VMware / Omnissa Horizon **RDSH published apps** (not full VDI) on domain-joined and workgroup Windows endpoints.
+- **Source of truth:** Follow `docs/horizon_multi_tenant_fleet_control_plane_master_specification.md`. Prefer it over older handoff notes when they conflict.
+- **Multi-tenancy:** Every table, API, SignalR group, Redis key, Loki stream (`X-Scope-OrgID`), VictoriaMetrics series, and MinIO path is isolated by `tenant_id` (UUID). Never trust client-supplied `tenant_id`; take it from validated auth claims. Enforce Postgres RLS.
+- **Job Object isolation (CRITICAL):** Never kill `vmware-view.exe`, `horizon-client.exe`, or `remotemks.exe` by global process name. Assign each Horizon Client root PID to its own Win32 Job Object; terminate only via `TerminateJobObject` for that `instance_id`.
+- **Commands target `instance_id`:** PIDs are host-local telemetry only; the Tray resolves the live Job handle.
+- **Virtual OUs:** Postgres `ltree` hierarchy (no AD required). Assign via enrollment tokens, dynamic rules, or admin drag-and-drop.
+- **Single MSI agent:** `HorizonWatchdog.Service` (Session 0) + `Tray` (user session) + `Updater` + `packages/`.

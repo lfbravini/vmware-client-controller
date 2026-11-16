@@ -1,0 +1,15 @@
+---
+description: Linux control-plane API, tenancy, and data-access rules
+globs: src/HorizonControl.Api/**
+alwaysApply: false
+---
+
+# HorizonControl.Api (Linux)
+
+- Target `net8.0` only. No Win32, DPAPI, or Windows-only assemblies.
+- Stack: ASP.NET Core Web API + SignalR + EF Core (primary) + Npgsql. Use Dapper/raw SQL only for awkward `ltree` / RLS queries.
+- Set Postgres `app.current_tenant` from auth claims and rely on RLS; never accept tenant from request body/query for authorization.
+- Agent routes (`/api/v1/agent/*`, `/hubs/agent`) use device credentials derived from enrollment (`agent_secret`); admin/external routes stay VPN/LAN-oriented per Caddy design.
+- Correlate hangs against cached Horizon broker session data when possible; live Horizon REST as fallback.
+- Forward tenant-scoped telemetry with Loki `X-Scope-OrgID` and VictoriaMetrics `tenant_id` tags when those pipelines exist.
+- Every mutating admin/agent action should produce an `audit_logs` row.

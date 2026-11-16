@@ -1,0 +1,13 @@
+---
+description: Docker Compose, Caddy, and observability deploy rules
+globs: deploy/**
+alwaysApply: false
+---
+
+# Deploy / Infra
+
+- Intended stack: Caddy 2 (TLS 1.3 on 8443/443), `control-api`, `web-gui`, Postgres 16 (`ltree`+RLS), Redis 7, VictoriaMetrics, Loki, MinIO, RustDesk `hbbs`/`hbbr`.
+- **MVP sequencing:** Prefer Caddy + API + Postgres first; add Redis/MinIO/Loki/VM/RustDesk when the remediation loop needs them.
+- Caddy path split: `/api/v1/agent/*` + `/hubs/agent` reachable Internet+VPN; `/*`, `/swagger/*`, `/api/v1/external/*` restricted to VPN/LAN CIDRs.
+- Agents must never reach Horizon Connection Server APIs directly — only the control plane over internal VPN/LAN.
+- After edits: `docker compose config`; for Caddyfile changes run `caddy validate` when available.

@@ -1,0 +1,14 @@
+---
+description: Shared DTO, policy, SignalR, and IPC contract rules
+globs: src/HorizonControl.Shared/**
+alwaysApply: false
+---
+
+# HorizonControl.Shared
+
+- This project owns all cross-boundary contracts: DTOs, Virtual OU policy models, SignalR hub interfaces, Named Pipe IPC message types.
+- Keep types serializable (System.Text.Json-friendly); no Win32, DPAPI, or ASP.NET hosting types.
+- Prefer explicit records/enums for commands (`RESTART_CLIENT_INSTANCE`, `START_REMOTE_ASSIST`, etc.), instance states, and anti-panic-click actions.
+- Remote commands must include idempotency `command_id` (UUID) and `ttl_sec`.
+- Policy JSON shape must stay aligned with the master spec (`monitoring`, `remediation`, `multi_instance`, `lifecycle`, `packages`).
+- After any contract change: `dotnet build` on Shared (and dependent projects if they already exist).
