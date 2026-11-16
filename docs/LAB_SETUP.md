@@ -34,12 +34,16 @@ docker compose -f deploy/docker-compose.yml up --build
 
 Open `http://localhost:8080/swagger`.
 
-If Docker Desktop was just installed and the engine fails (`unable to start` / pipe error):
+If Docker Desktop was just installed and the engine fails (`unable to start` / pipe error / WSL has no distros):
 
-1. Finish WSL Ubuntu first-run if prompted.
+1. Enable **Virtual Machine Platform** (and ensure CPU virtualization is on in BIOS/firmware).  
+   Elevated: `dism /online /enable-feature /featurename:VirtualMachinePlatform /all /norestart`
 2. **Reboot** Windows.
-3. Start Docker Desktop and wait until it is healthy (`docker info`).
-4. Retry `docker compose ... up --build`.
+3. `wsl --install -d Ubuntu`, finish first-run user setup.
+4. Start Docker Desktop and wait until healthy (`docker info`).
+5. Retry `docker compose ... up --build`.
+
+On this lab PC, Hyper-V/virtualization detection was incomplete until features are enabled + reboot — Mode B remains the reliable path until then.
 
 ## Mode B — Local Postgres + API (fallback)
 
