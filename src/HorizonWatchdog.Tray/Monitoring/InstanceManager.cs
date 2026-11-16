@@ -1,6 +1,7 @@
 using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.Runtime.InteropServices;
+using System.Security.Cryptography;
 using System.Text;
 using HorizonControl.Shared.Agent;
 using HorizonControl.Shared.Enums;
@@ -14,9 +15,12 @@ public sealed class TrackedInstance : IDisposable
     public Guid InstanceId { get; init; }
     public int RootPid { get; init; }
     public string JobObjectName { get; init; } = string.Empty;
-    public string BrokerFqdn { get; set; } = "lab.local";
+    public string BrokerFqdn { get; set; } = "unknown";
     public string? HorizonUser { get; set; }
     public string? TargetApp { get; set; }
+    public string ProcessName { get; init; } = string.Empty;
+    public string? ExecutablePath { get; init; }
+    public string? CommandLine { get; init; }
     public SafeJobHandle Job { get; init; } = null!;
     public DateTimeOffset StartedAtUtc { get; init; }
     public ConcurrentDictionary<long, int> HangFailures { get; } = new();
@@ -77,7 +81,11 @@ public sealed class InstanceManager
 
     private void AssignJob(Process proc)
     {
-        var instanceId = Guid.NewGuid();
+        DateTimeOffset started;
+        try { started = proc.StartTime.ToUniversalTime(); }
+        catch { started = DateTimeOffset.UtcNow; }
+
+        var instanceId = StableInstanceId(Environment.MachineName, proc.ProcessName, proc.Id, started);
         var jobName = $"HorizonWatchdog_Job_{instanceId:N}";
         var job = JobObjectNative.CreateJobObject(IntPtr.Zero, jobName);
         if (job.IsInvalid)
@@ -123,18 +131,112 @@ public sealed class InstanceManager
             JobObjectNative.CloseHandle(handle);
         }
 
+        string? exe = null;
+        string? cmd = null;
+        try { exe = proc.MainModule?.FileName; } catch { /* access denied */ }
+        cmd = TryReadCommandLine(proc.Id);
+        var (broker, user) = ParseBrokerAndUser(cmd, exe);
+
         var tracked = new TrackedInstance
         {
             InstanceId = instanceId,
             RootPid = proc.Id,
             JobObjectName = jobName,
             Job = job,
-            StartedAtUtc = DateTimeOffset.UtcNow,
-            TargetApp = proc.ProcessName
+            StartedAtUtc = started,
+            TargetApp = proc.ProcessName,
+            ProcessName = proc.ProcessName,
+            ExecutablePath = exe,
+            CommandLine = cmd,
+            BrokerFqdn = broker,
+            HorizonUser = user
         };
         _byId[instanceId] = tracked;
         _pidToId[proc.Id] = instanceId;
-        Debug.WriteLine($"Assigned PID {proc.Id} to {jobName}");
+        Debug.WriteLine($"Assigned PID {proc.Id} to {jobName} broker={broker}");
+    }
+
+    private static Guid StableInstanceId(string host, string processName, int pid, DateTimeOffset started)
+    {
+        var raw = $"{host}|{processName}|{pid}|{started:O}";
+        var hash = SHA256.HashData(Encoding.UTF8.GetBytes(raw));
+        Span<byte> guidBytes = stackalloc byte[16];
+        hash.AsSpan(0, 16).CopyTo(guidBytes);
+        return new Guid(guidBytes);
+    }
+
+    private static string? TryReadCommandLine(int pid)
+    {
+        try
+        {
+            using var searcher = new System.Management.ManagementObjectSearcher(
+                $"SELECT CommandLine FROM Win32_Process WHERE ProcessId = {pid}");
+            foreach (var obj in searcher.Get())
+            {
+                return obj["CommandLine"]?.ToString();
+            }
+        }
+        catch
+        {
+            // WMI may be unavailable
+        }
+
+        return null;
+    }
+
+    private static (string Broker, string? User) ParseBrokerAndUser(string? commandLine, string? exePath)
+    {
+        if (string.IsNullOrWhiteSpace(commandLine))
+        {
+            var name = Path.GetFileNameWithoutExtension(exePath ?? "") ?? "";
+            return string.Equals(name, "HorizonWatchdog.FakeClient", StringComparison.OrdinalIgnoreCase)
+                ? ("lab.fakeclient", Environment.UserName)
+                : ("unknown", null);
+        }
+
+        // Common patterns: -serverURL https://broker.example -userName domain\user
+        string? broker = null;
+        string? user = null;
+        var parts = commandLine.Split(' ', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        for (var i = 0; i < parts.Length; i++)
+        {
+            var p = parts[i].Trim('"');
+            if (p.Equals("-serverURL", StringComparison.OrdinalIgnoreCase) ||
+                p.Equals("--serverURL", StringComparison.OrdinalIgnoreCase) ||
+                p.Equals("-serverName", StringComparison.OrdinalIgnoreCase))
+            {
+                if (i + 1 < parts.Length)
+                {
+                    broker = parts[i + 1].Trim('"');
+                    if (Uri.TryCreate(broker, UriKind.Absolute, out var uri))
+                    {
+                        broker = uri.Host;
+                    }
+                }
+            }
+
+            if (p.Equals("-userName", StringComparison.OrdinalIgnoreCase) ||
+                p.Equals("-loginAsCurrentUser", StringComparison.OrdinalIgnoreCase))
+            {
+                if (p.Equals("-loginAsCurrentUser", StringComparison.OrdinalIgnoreCase))
+                {
+                    user = Environment.UserName;
+                }
+                else if (i + 1 < parts.Length)
+                {
+                    user = parts[i + 1].Trim('"');
+                }
+            }
+        }
+
+        if (string.IsNullOrWhiteSpace(broker) &&
+            commandLine.Contains("FakeClient", StringComparison.OrdinalIgnoreCase))
+        {
+            broker = "lab.fakeclient";
+            user ??= Environment.UserName;
+        }
+
+        return (string.IsNullOrWhiteSpace(broker) ? "unknown" : broker, user);
     }
 
     public sealed record HangHit(TrackedInstance Instance, string Title, IntPtr Hwnd);
@@ -224,12 +326,20 @@ public sealed class InstanceManager
         return null;
     }
 
-    public bool TerminateInstance(Guid instanceId)
+    public bool TerminateInstance(Guid instanceId) =>
+        TerminateInstance(instanceId, relaunch: false);
+
+    public bool TerminateInstance(Guid instanceId, bool relaunch)
     {
         if (!_byId.TryGetValue(instanceId, out var tracked))
         {
             return false;
         }
+
+        var processName = tracked.ProcessName;
+        var exe = tracked.ExecutablePath;
+        var broker = tracked.BrokerFqdn;
+        var user = tracked.HorizonUser;
 
         if (!JobObjectNative.TerminateJobObject(tracked.Job, 1))
         {
@@ -237,8 +347,72 @@ public sealed class InstanceManager
         }
 
         tracked.State = ManagedInstanceState.Terminated;
+        _byId.TryRemove(instanceId, out _);
+        _pidToId.TryRemove(tracked.RootPid, out _);
+        tracked.Dispose();
         Debug.WriteLine($"Terminated Job Object for instance {instanceId}");
+
+        if (relaunch)
+        {
+            TryRelaunch(processName, exe, broker, user);
+        }
+
         return true;
+    }
+
+    private static void TryRelaunch(string processName, string? exePath, string broker, string? user)
+    {
+        try
+        {
+            if (string.Equals(processName, "HorizonWatchdog.FakeClient", StringComparison.OrdinalIgnoreCase))
+            {
+                var path = exePath;
+                if (string.IsNullOrWhiteSpace(path) || !File.Exists(path))
+                {
+                    path = Path.Combine(AppContext.BaseDirectory, "HorizonWatchdog.FakeClient.exe");
+                }
+
+                if (File.Exists(path))
+                {
+                    Process.Start(new ProcessStartInfo(path) { UseShellExecute = true });
+                }
+
+                return;
+            }
+
+            // Horizon Client: never pass -password. Prefer -logInAsCurrentUser + serverURL when known.
+            var horizon = exePath;
+            if (string.IsNullOrWhiteSpace(horizon) || !File.Exists(horizon))
+            {
+                var candidates = new[]
+                {
+                    Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles), "VMware", "VMware Horizon View Client", "vmware-view.exe"),
+                    Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles), "Omnissa", "Omnissa Horizon Client", "horizon-client.exe")
+                };
+                horizon = candidates.FirstOrDefault(File.Exists);
+            }
+
+            if (string.IsNullOrWhiteSpace(horizon))
+            {
+                Debug.WriteLine("Relaunch skipped: Horizon Client executable not found");
+                return;
+            }
+
+            var args = new StringBuilder("-logInAsCurrentUser");
+            if (!string.IsNullOrWhiteSpace(broker) &&
+                !string.Equals(broker, "unknown", StringComparison.OrdinalIgnoreCase) &&
+                !string.Equals(broker, "lab.fakeclient", StringComparison.OrdinalIgnoreCase))
+            {
+                args.Append(" -serverURL ").Append(broker.Contains("://", StringComparison.Ordinal) ? broker : $"https://{broker}");
+            }
+
+            _ = user; // reserved for CredMgr lookup in a later slice
+            Process.Start(new ProcessStartInfo(horizon, args.ToString()) { UseShellExecute = true });
+        }
+        catch (Exception ex)
+        {
+            Debug.WriteLine($"Relaunch failed: {ex.Message}");
+        }
     }
 
     public List<ManagedInstanceSnapshot> Snapshot() =>

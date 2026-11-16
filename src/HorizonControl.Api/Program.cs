@@ -38,6 +38,8 @@ builder.Services.AddSwaggerGen(c =>
     });
 });
 builder.Services.AddScoped<DbSeeder>();
+builder.Services.AddHttpClient("horizon-broker", c => c.Timeout = TimeSpan.FromSeconds(20));
+builder.Services.AddHostedService<BrokerPollerService>();
 
 var app = builder.Build();
 
@@ -66,10 +68,28 @@ app.UseSwaggerUI();
 app.UseAuthentication();
 app.UseAuthorization();
 
-app.MapGet("/health", () => Results.Ok(new { status = "ok" }));
+app.MapGet("/health", () => Results.Ok(new { status = "ok", version = "v1-lab" }));
 app.MapAgentEndpoints();
 app.MapAdminEndpoints();
 app.MapHub<AgentHub>("/hubs/agent");
+
+// Lab mock Horizon Connection Server surface (polled by BrokerPollerService).
+if (fleetOpts.AllowLabDefaults)
+{
+    app.MapGet("/lab/mock-horizon/rest/monitor/v1/sessions", () =>
+        Results.Ok(new
+        {
+            sessions = new[]
+            {
+                new
+                {
+                    id = "lab-session-1",
+                    user_name = "lab.user",
+                    dns_name = "rdsh-lab-01"
+                }
+            }
+        }));
+}
 
 using (var scope = app.Services.CreateScope())
 {

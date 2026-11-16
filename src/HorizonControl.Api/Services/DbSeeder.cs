@@ -18,6 +18,7 @@ public sealed class DbSeeder(
         await db.Database.ExecuteSqlRawAsync("""CREATE EXTENSION IF NOT EXISTS "uuid-ossp";""", cancellationToken);
         await db.Database.ExecuteSqlRawAsync("""CREATE EXTENSION IF NOT EXISTS "ltree";""", cancellationToken);
         await db.Database.MigrateAsync(cancellationToken);
+        await EnsureSchemaExtrasAsync(cancellationToken);
 
         await EnsureRlsAsync(cancellationToken);
 
@@ -68,6 +69,38 @@ public sealed class DbSeeder(
         logger.LogInformation(
             "Lab seed ready for tenant {TenantSlug}. Enrollment token is configured via FleetControl__LabEnrollmentToken (hash only in DB).",
             tenant.Slug);
+    }
+
+    private async Task EnsureSchemaExtrasAsync(CancellationToken cancellationToken)
+    {
+        // Additive columns/tables for post-V1 slices without forcing a new EF migration in lab.
+        const string sql = """
+            ALTER TABLE processed_commands ADD COLUMN IF NOT EXISTS success boolean NOT NULL DEFAULT true;
+            ALTER TABLE processed_commands ADD COLUMN IF NOT EXISTS message text NULL;
+            ALTER TABLE processed_commands ADD COLUMN IF NOT EXISTS instance_id uuid NULL;
+            CREATE TABLE IF NOT EXISTS horizon_brokers (
+              broker_id uuid PRIMARY KEY,
+              tenant_id uuid NOT NULL,
+              name text NOT NULL,
+              base_url text NOT NULL,
+              public_fqdn text NOT NULL,
+              encrypted_credentials text NOT NULL DEFAULT '',
+              poll_interval_sec int NOT NULL DEFAULT 30,
+              last_poll_at timestamptz NULL,
+              last_poll_error text NULL
+            );
+            CREATE TABLE IF NOT EXISTS broker_session_snapshots (
+              snapshot_id uuid PRIMARY KEY,
+              tenant_id uuid NOT NULL,
+              broker_id uuid NOT NULL,
+              session_id text NOT NULL,
+              user_name text NULL,
+              dns_name text NULL,
+              broker_fqdn text NULL,
+              observed_at timestamptz NOT NULL
+            );
+            """;
+        await db.Database.ExecuteSqlRawAsync(sql, cancellationToken);
     }
 
     private async Task EnsureRlsAsync(CancellationToken cancellationToken)

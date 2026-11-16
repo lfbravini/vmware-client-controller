@@ -4,6 +4,7 @@ using HorizonControl.Api.Security;
 using HorizonControl.Shared.Admin;
 using HorizonControl.Shared.Commands;
 using HorizonControl.Shared.Enums;
+using HorizonControl.Shared.Policy;
 using HorizonControl.Shared.SignalR;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.SignalR;
@@ -25,8 +26,175 @@ public static class AdminEndpoints
         group.MapGet("/ous", ListOusAsync);
         group.MapGet("/enrollment-tokens", ListEnrollmentTokensAsync);
         group.MapPost("/enrollment-tokens", CreateEnrollmentTokenAsync);
+        group.MapGet("/ous/{ouId:guid}/policy", GetOuPolicyAsync);
+        group.MapPut("/ous/{ouId:guid}/policy", PutOuPolicyAsync);
+        group.MapGet("/commands", ListCommandsAsync);
+        group.MapGet("/brokers", ListBrokersAsync);
+        group.MapPost("/brokers", UpsertBrokerAsync);
+        group.MapGet("/broker-sessions", ListBrokerSessionsAsync);
 
         return group;
+    }
+
+    private static async Task<IResult> GetOuPolicyAsync(Guid ouId, FleetDbContext db)
+    {
+        var ou = await db.VirtualOus.AsNoTracking().FirstOrDefaultAsync(o => o.OuId == ouId);
+        if (ou is null)
+        {
+            return Results.NotFound();
+        }
+
+        var policy = string.IsNullOrWhiteSpace(ou.PolicyOverrideJson)
+            ? new OuPolicy()
+            : JsonSerializer.Deserialize<OuPolicy>(ou.PolicyOverrideJson) ?? new OuPolicy();
+        return Results.Ok(policy);
+    }
+
+    private static async Task<IResult> PutOuPolicyAsync(
+        Guid ouId,
+        [FromBody] OuPolicy policy,
+        FleetDbContext db,
+        IHubContext<AgentHub, IAgentHubClient> hub)
+    {
+        var ou = await db.VirtualOus.FirstOrDefaultAsync(o => o.OuId == ouId);
+        if (ou is null)
+        {
+            return Results.NotFound();
+        }
+
+        ou.PolicyOverrideJson = JsonSerializer.Serialize(policy);
+        await db.SaveChangesAsync();
+
+        var agentIds = await db.Endpoints.AsNoTracking()
+            .Where(e => e.OuId == ouId)
+            .Select(e => e.AgentUuid)
+            .ToListAsync();
+        foreach (var agentUuid in agentIds)
+        {
+            await hub.Clients.Group(AgentHubGroups.ForAgent(ou.TenantId, agentUuid)).PolicyUpdated(policy);
+        }
+
+        return Results.Ok(policy);
+    }
+
+    private static async Task<IResult> ListCommandsAsync(FleetDbContext db, [FromQuery] int take = 50)
+    {
+        take = Math.Clamp(take, 1, 200);
+        var items = await db.ProcessedCommands.AsNoTracking()
+            .OrderByDescending(c => c.CreatedAt)
+            .Take(take)
+            .Select(c => new CommandListItem
+            {
+                CommandId = c.CommandId,
+                AgentUuid = c.AgentUuid,
+                InstanceId = c.InstanceId,
+                Success = c.Success,
+                Message = c.Message,
+                CreatedAtUtc = c.CreatedAt
+            })
+            .ToListAsync();
+        return Results.Ok(items);
+    }
+
+    private static async Task<IResult> ListBrokersAsync(FleetDbContext db, [FromQuery] Guid? tenantId)
+    {
+        var q = db.HorizonBrokers.AsNoTracking().AsQueryable();
+        if (tenantId is { } tid)
+        {
+            q = q.Where(b => b.TenantId == tid);
+        }
+
+        var items = await q.OrderBy(b => b.Name)
+            .Select(b => new HorizonBrokerListItem
+            {
+                BrokerId = b.BrokerId,
+                TenantId = b.TenantId,
+                Name = b.Name,
+                BaseUrl = b.BaseUrl,
+                PublicFqdn = b.PublicFqdn,
+                PollIntervalSec = b.PollIntervalSec,
+                LastPollAtUtc = b.LastPollAt,
+                LastPollError = b.LastPollError
+            })
+            .ToListAsync();
+        return Results.Ok(items);
+    }
+
+    private static async Task<IResult> UpsertBrokerAsync([FromBody] UpsertHorizonBrokerRequest request, FleetDbContext db)
+    {
+        if (!await db.Tenants.AnyAsync(t => t.TenantId == request.TenantId))
+        {
+            return Results.BadRequest(new { error = "Unknown tenant." });
+        }
+
+        var fqdn = string.IsNullOrWhiteSpace(request.PublicFqdn)
+            ? (Uri.TryCreate(request.BaseUrl, UriKind.Absolute, out var u) ? u.Host : request.BaseUrl)
+            : request.PublicFqdn;
+
+        var existing = await db.HorizonBrokers.FirstOrDefaultAsync(b =>
+            b.TenantId == request.TenantId && b.PublicFqdn == fqdn);
+        if (existing is null)
+        {
+            existing = new HorizonBroker
+            {
+                BrokerId = Guid.NewGuid(),
+                TenantId = request.TenantId,
+                PublicFqdn = fqdn
+            };
+            db.HorizonBrokers.Add(existing);
+        }
+
+        existing.Name = request.Name;
+        existing.BaseUrl = request.BaseUrl.TrimEnd('/');
+        existing.PublicFqdn = fqdn;
+        existing.EncryptedCredentials = request.Credentials ?? existing.EncryptedCredentials;
+        existing.PollIntervalSec = request.PollIntervalSec <= 0 ? 30 : request.PollIntervalSec;
+        await db.SaveChangesAsync();
+
+        return Results.Ok(new HorizonBrokerListItem
+        {
+            BrokerId = existing.BrokerId,
+            TenantId = existing.TenantId,
+            Name = existing.Name,
+            BaseUrl = existing.BaseUrl,
+            PublicFqdn = existing.PublicFqdn,
+            PollIntervalSec = existing.PollIntervalSec,
+            LastPollAtUtc = existing.LastPollAt,
+            LastPollError = existing.LastPollError
+        });
+    }
+
+    private static async Task<IResult> ListBrokerSessionsAsync(FleetDbContext db)
+    {
+        var sessions = await db.BrokerSessionSnapshots.AsNoTracking()
+            .OrderByDescending(s => s.ObservedAt)
+            .Take(200)
+            .ToListAsync();
+        var instances = await db.ManagedInstances.AsNoTracking()
+            .Where(i => i.State != "TERMINATED")
+            .ToListAsync();
+        var endpoints = await db.Endpoints.AsNoTracking().ToDictionaryAsync(e => e.AgentUuid, e => e.Hostname);
+
+        var items = sessions.Select(s =>
+        {
+            var match = instances.FirstOrDefault(i =>
+                string.Equals(i.BrokerFqdn, s.BrokerFqdn, StringComparison.OrdinalIgnoreCase) &&
+                (string.IsNullOrWhiteSpace(s.UserName) ||
+                 string.Equals(i.HorizonUser, s.UserName, StringComparison.OrdinalIgnoreCase)));
+            return new BrokerSessionListItem
+            {
+                SnapshotId = s.SnapshotId,
+                BrokerId = s.BrokerId,
+                SessionId = s.SessionId,
+                UserName = s.UserName,
+                DnsName = s.DnsName,
+                BrokerFqdn = s.BrokerFqdn,
+                ObservedAtUtc = s.ObservedAt,
+                CorrelatedInstanceId = match?.InstanceId,
+                CorrelatedHostname = match is null ? null : endpoints.GetValueOrDefault(match.AgentUuid)
+            };
+        }).ToList();
+        return Results.Ok(items);
     }
 
     private static async Task<IResult> ListTenantsAsync(FleetDbContext db)
@@ -168,26 +336,30 @@ public static class AdminEndpoints
         return Results.Ok(items);
     }
 
-    private static async Task<IResult> ListInstancesAsync(FleetDbContext db)
+    private static async Task<IResult> ListInstancesAsync(FleetDbContext db, [FromQuery] bool liveOnly = false)
     {
+        var cutoff = DateTimeOffset.UtcNow.AddSeconds(-90);
         var rows = await (
             from i in db.ManagedInstances.AsNoTracking()
             join e in db.Endpoints.AsNoTracking() on i.AgentUuid equals e.AgentUuid
             orderby i.UpdatedAt descending
-            select new { i, e.Hostname }).ToListAsync();
+            select new { i, e.Hostname, e.LastSeenAt }).ToListAsync();
 
-        var items = rows.Select(r => new ManagedInstanceListItem
-        {
-            InstanceId = r.i.InstanceId,
-            AgentUuid = r.i.AgentUuid,
-            Hostname = r.Hostname,
-            BrokerFqdn = r.i.BrokerFqdn,
-            HorizonUser = r.i.HorizonUser,
-            RootPid = r.i.RootPid,
-            JobObjectName = r.i.JobObjectName,
-            State = MapState(r.i.State),
-            UpdatedAtUtc = r.i.UpdatedAt
-        }).ToList();
+        var items = rows
+            .Where(r => !liveOnly || (r.i.State != "TERMINATED" && r.i.UpdatedAt >= cutoff))
+            .Select(r => new ManagedInstanceListItem
+            {
+                InstanceId = r.i.InstanceId,
+                AgentUuid = r.i.AgentUuid,
+                Hostname = r.Hostname,
+                BrokerFqdn = r.i.BrokerFqdn,
+                HorizonUser = r.i.HorizonUser,
+                RootPid = r.i.RootPid,
+                JobObjectName = r.i.JobObjectName,
+                State = MapState(r.i.State),
+                UpdatedAtUtc = r.i.UpdatedAt,
+                IsLive = r.i.State != "TERMINATED" && r.i.UpdatedAt >= cutoff && r.LastSeenAt >= cutoff
+            }).ToList();
         return Results.Ok(items);
     }
 
@@ -202,6 +374,17 @@ public static class AdminEndpoints
             return Results.NotFound(new { error = "Instance not found." });
         }
 
+        if (string.Equals(instance.State, "TERMINATED", StringComparison.OrdinalIgnoreCase))
+        {
+            return Results.BadRequest(new { error = "Instance is TERMINATED; cannot restart." });
+        }
+
+        var endpoint = await db.Endpoints.AsNoTracking().FirstOrDefaultAsync(e => e.AgentUuid == instance.AgentUuid);
+        if (endpoint is null || endpoint.LastSeenAt < DateTimeOffset.UtcNow.AddMinutes(-2))
+        {
+            return Results.BadRequest(new { error = "Agent appears offline (lastSeen stale)." });
+        }
+
         var command = new AgentCommand
         {
             CommandId = Guid.NewGuid(),
@@ -211,6 +394,15 @@ public static class AdminEndpoints
             IssuedAtUtc = DateTimeOffset.UtcNow
         };
 
+        db.ProcessedCommands.Add(new ProcessedCommand
+        {
+            CommandId = command.CommandId,
+            AgentUuid = instance.AgentUuid,
+            InstanceId = instance.InstanceId,
+            CreatedAt = DateTimeOffset.UtcNow,
+            Success = false,
+            Message = "Dispatched"
+        });
         db.AuditLogs.Add(new AuditLog
         {
             TenantId = instance.TenantId,

@@ -38,6 +38,10 @@ public sealed class ManagedInstanceListItem
     public ManagedInstanceState State { get; set; }
 
     public DateTimeOffset UpdatedAtUtc { get; set; }
+
+    public bool IsLive { get; set; }
+
+    public string? CorrelatedBrokerSessionId { get; set; }
 }
 
 public sealed class RestartInstanceRequest
@@ -123,4 +127,82 @@ public sealed class CreateEnrollmentTokenResponse
     public DateTimeOffset? ExpiresAtUtc { get; set; }
 
     public int? MaxUses { get; set; }
+}
+
+public sealed class OuPolicyUpdateRequest
+{
+    public Guid OuId { get; set; }
+
+    public Policy.OuPolicy Policy { get; set; } = new();
+}
+
+public sealed class CommandListItem
+{
+    public Guid CommandId { get; set; }
+
+    public Guid AgentUuid { get; set; }
+
+    public Guid? InstanceId { get; set; }
+
+    public bool Success { get; set; }
+
+    public string? Message { get; set; }
+
+    public DateTimeOffset CreatedAtUtc { get; set; }
+}
+
+public sealed class HorizonBrokerListItem
+{
+    public Guid BrokerId { get; set; }
+
+    public Guid TenantId { get; set; }
+
+    public string Name { get; set; } = string.Empty;
+
+    public string BaseUrl { get; set; } = string.Empty;
+
+    public string PublicFqdn { get; set; } = string.Empty;
+
+    public int PollIntervalSec { get; set; }
+
+    public DateTimeOffset? LastPollAtUtc { get; set; }
+
+    public string? LastPollError { get; set; }
+}
+
+public sealed class UpsertHorizonBrokerRequest
+{
+    public Guid TenantId { get; set; }
+
+    public string Name { get; set; } = string.Empty;
+
+    public string BaseUrl { get; set; } = string.Empty;
+
+    public string PublicFqdn { get; set; } = string.Empty;
+
+    /// <summary>Lab/dev credential blob (stored as-is for mock brokers; production should encrypt).</summary>
+    public string? Credentials { get; set; }
+
+    public int PollIntervalSec { get; set; } = 30;
+}
+
+public sealed class BrokerSessionListItem
+{
+    public Guid SnapshotId { get; set; }
+
+    public Guid BrokerId { get; set; }
+
+    public string SessionId { get; set; } = string.Empty;
+
+    public string? UserName { get; set; }
+
+    public string? DnsName { get; set; }
+
+    public string? BrokerFqdn { get; set; }
+
+    public DateTimeOffset ObservedAtUtc { get; set; }
+
+    public Guid? CorrelatedInstanceId { get; set; }
+
+    public string? CorrelatedHostname { get; set; }
 }

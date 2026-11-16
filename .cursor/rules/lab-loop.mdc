@@ -1,0 +1,11 @@
+---
+description: After any vertical slice, run the Portainer lab loop — do not leave redeploy/test to the user
+alwaysApply: true
+---
+
+# Lab loop (proactive)
+
+- Prefer `.\scripts\lab-up.ps1` (or `lab-redeploy` + `lab-agents` + `lab-test`) after API/Web/agent changes.
+- Report UC1–UC5 PASS/FAIL; do not stop at `dotnet build` alone.
+- Portainer token lives in gitignored `docs/api.txt`. Only human step is UAC for Service install.
+- Do not ask the user to click Portainer UI for routine redeploys.

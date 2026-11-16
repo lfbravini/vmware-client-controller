@@ -1,7 +1,9 @@
 using System.Collections.Concurrent;
+using System.Text.Json;
 using HorizonControl.Shared.Commands;
 using HorizonControl.Shared.Enums;
 using HorizonControl.Shared.Ipc;
+using HorizonControl.Shared.Policy;
 using HorizonWatchdog.Tray.Ipc;
 using HorizonWatchdog.Tray.Monitoring;
 
@@ -14,7 +16,8 @@ public sealed class TrayApplicationContext : ApplicationContext
     private readonly InstanceManager _instances = new();
     private readonly TrayPipeClient _pipe = new();
     private readonly ConcurrentDictionary<Guid, byte> _seenCommands = new();
-    private readonly int _consecutiveRequired = 3;
+    private OuPolicy _policy = LoadCachedPolicy();
+    private readonly ConcurrentQueue<DateTimeOffset> _restartTimes = new();
 
     public TrayApplicationContext()
     {
@@ -30,9 +33,33 @@ public sealed class TrayApplicationContext : ApplicationContext
         _pipe.MessageReceived += OnPipeMessageAsync;
         _ = ConnectPipeAsync();
 
-        _timer = new System.Windows.Forms.Timer { Interval = 5000 };
+        _timer = new System.Windows.Forms.Timer
+        {
+            Interval = Math.Max(1000, _policy.Monitoring.CheckIntervalSec * 1000)
+        };
         _timer.Tick += async (_, _) => await TickAsync();
         _timer.Start();
+    }
+
+    private static OuPolicy LoadCachedPolicy()
+    {
+        try
+        {
+            var path = Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData),
+                "HorizonWatchdog",
+                "policy.json");
+            if (File.Exists(path))
+            {
+                return JsonSerializer.Deserialize<OuPolicy>(File.ReadAllText(path)) ?? new OuPolicy();
+            }
+        }
+        catch
+        {
+            // use defaults
+        }
+
+        return new OuPolicy();
     }
 
     private async Task ConnectPipeAsync()
@@ -55,10 +82,17 @@ public sealed class TrayApplicationContext : ApplicationContext
     {
         try
         {
+            var intervalMs = Math.Max(1000, _policy.Monitoring.CheckIntervalSec * 1000);
+            if (_timer.Interval != intervalMs)
+            {
+                _timer.Interval = intervalMs;
+            }
+
             _instances.DiscoverAndTrack();
             _ = InstanceManager.ExistingLogDirs();
 
-            var hangs = _instances.CheckHangs(_consecutiveRequired);
+            var required = Math.Max(1, _policy.Monitoring.ConsecutiveFailuresRequired);
+            var hangs = _instances.CheckHangs(required);
             foreach (var hit in hangs.DistinctBy(h => h.Instance.InstanceId))
             {
                 await _pipe.SendAsync(new IpcEnvelope
@@ -93,6 +127,12 @@ public sealed class TrayApplicationContext : ApplicationContext
 
     private async Task OnPipeMessageAsync(IpcEnvelope message)
     {
+        if (message.Type == IpcMessageType.PolicyPush && message.Policy is not null)
+        {
+            _policy = message.Policy;
+            return;
+        }
+
         if (message.Type != IpcMessageType.ExecuteLocalCommand || message.Execute?.Command is null)
         {
             return;
@@ -147,12 +187,38 @@ public sealed class TrayApplicationContext : ApplicationContext
 
             try
             {
-                var ok = _instances.TerminateInstance(id);
+                if (command.Type == AgentCommandType.RestartClientInstance && !AllowRestart())
+                {
+                    return new CommandResultIpcMessage
+                    {
+                        CommandId = command.CommandId,
+                        Success = false,
+                        Message = $"Blocked by max_restarts_per_hour={_policy.Remediation.MaxRestartsPerHour}"
+                    };
+                }
+
+                var relaunch = command.Type == AgentCommandType.RestartClientInstance;
+                var ok = _instances.TerminateInstance(id, relaunch);
+                if (ok && relaunch)
+                {
+                    _restartTimes.Enqueue(DateTimeOffset.UtcNow);
+                    if (_policy.Remediation.NotifyUserOnRestart)
+                    {
+                        _icon.ShowBalloonTip(
+                            4000,
+                            "Horizon Watchdog",
+                            "Client instance restarted (Job Object terminate + relaunch).",
+                            ToolTipIcon.Info);
+                    }
+                }
+
                 return new CommandResultIpcMessage
                 {
                     CommandId = command.CommandId,
                     Success = ok,
-                    Message = ok ? "TerminateJobObject completed" : "Instance not found"
+                    Message = ok
+                        ? (relaunch ? "TerminateJobObject + relaunch attempted" : "TerminateJobObject completed")
+                        : "Instance not found"
                 };
             }
             catch (Exception ex)
@@ -170,8 +236,25 @@ public sealed class TrayApplicationContext : ApplicationContext
         {
             CommandId = command.CommandId,
             Success = false,
-            Message = $"Unsupported command {command.Type} in MVP"
+            Message = $"Unsupported command {command.Type}"
         };
+    }
+
+    private bool AllowRestart()
+    {
+        var max = Math.Max(0, _policy.Remediation.MaxRestartsPerHour);
+        if (max == 0)
+        {
+            return true;
+        }
+
+        var cutoff = DateTimeOffset.UtcNow.AddHours(-1);
+        while (_restartTimes.TryPeek(out var t) && t < cutoff)
+        {
+            _restartTimes.TryDequeue(out _);
+        }
+
+        return _restartTimes.Count < max;
     }
 
     protected override void ExitThreadCore()
@@ -179,7 +262,6 @@ public sealed class TrayApplicationContext : ApplicationContext
         _timer.Stop();
         _icon.Visible = false;
         _icon.Dispose();
-        _ = _pipe.DisposeAsync();
         base.ExitThreadCore();
     }
 }

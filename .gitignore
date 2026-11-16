@@ -40,6 +40,7 @@ appsettings.*.local.json
 docs/api.txt
 deploy/lab-run-logs/
 deploy/.lab-elevated-ready.txt
+artifacts/
 
 # OS
 Thumbs.db

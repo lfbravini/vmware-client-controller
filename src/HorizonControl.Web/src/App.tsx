@@ -3,6 +3,9 @@ import { getAdminKey } from "./api";
 import { LoginPage } from "./pages/LoginPage";
 import { FleetPage } from "./pages/FleetPage";
 import { InstancesPage } from "./pages/InstancesPage";
+import { TokensPage } from "./pages/TokensPage";
+import { PolicyPage } from "./pages/PolicyPage";
+import { BrokersPage } from "./pages/BrokersPage";
 import { Shell } from "./components/Shell";
 
 function RequireAuth({ children }: { children: React.ReactNode }) {
@@ -27,6 +30,9 @@ export function App() {
         <Route index element={<Navigate to="/fleet" replace />} />
         <Route path="fleet" element={<FleetPage />} />
         <Route path="instances" element={<InstancesPage />} />
+        <Route path="tokens" element={<TokensPage />} />
+        <Route path="policy" element={<PolicyPage />} />
+        <Route path="brokers" element={<BrokersPage />} />
       </Route>
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>

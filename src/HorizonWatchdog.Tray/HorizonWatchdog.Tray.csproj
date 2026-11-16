@@ -6,6 +6,9 @@
     <UseWindowsForms>true</UseWindowsForms>
   </PropertyGroup>
   <ItemGroup>
+    <PackageReference Include="System.Management" />
+  </ItemGroup>
+  <ItemGroup>
     <ProjectReference Include="..\HorizonControl.Shared\HorizonControl.Shared.csproj" />
   </ItemGroup>
 </Project>

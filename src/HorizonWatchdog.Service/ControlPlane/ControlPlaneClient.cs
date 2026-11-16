@@ -20,6 +20,7 @@ public sealed class ControlPlaneClient(
     private string _baseUrl = "http://localhost:8080";
 
     public event Func<AgentCommand, Task>? CommandReceived;
+    public event Func<OuPolicy, Task>? PolicyReceived;
     public OuPolicy CurrentPolicy { get; private set; } = new();
 
     public async Task EnsureEnrolledAsync(string enrollmentToken, CancellationToken cancellationToken)
@@ -91,6 +92,10 @@ public sealed class ControlPlaneClient(
         {
             CurrentPolicy = policy;
             await CachePolicyAsync(policy, CancellationToken.None);
+            if (PolicyReceived is not null)
+            {
+                await PolicyReceived(policy);
+            }
         });
 
         await _hub.StartAsync(cancellationToken);

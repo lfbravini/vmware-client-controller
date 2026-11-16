@@ -75,8 +75,10 @@ public sealed class AgentHub(FleetDbContext db, ILogger<AgentHub> logger) : Hub<
                 endpoint.HorizonClientVersion = heartbeat.HorizonClientVersion;
             }
 
+            var seenIds = new HashSet<Guid>();
             foreach (var snap in heartbeat.Instances)
             {
+                seenIds.Add(snap.InstanceId);
                 var row = await db.ManagedInstances.FirstOrDefaultAsync(i => i.InstanceId == snap.InstanceId);
                 if (row is null)
                 {
@@ -103,6 +105,15 @@ public sealed class AgentHub(FleetDbContext db, ILogger<AgentHub> logger) : Hub<
                     "TERMINATED" => "TERMINATED",
                     _ => snap.State.ToString().ToUpperInvariant()
                 };
+                row.UpdatedAt = DateTimeOffset.UtcNow;
+            }
+
+            var stale = await db.ManagedInstances
+                .Where(i => i.AgentUuid == agentUuid && !seenIds.Contains(i.InstanceId) && i.State != "TERMINATED")
+                .ToListAsync();
+            foreach (var row in stale)
+            {
+                row.State = "TERMINATED";
                 row.UpdatedAt = DateTimeOffset.UtcNow;
             }
 
@@ -172,17 +183,25 @@ public sealed class AgentHub(FleetDbContext db, ILogger<AgentHub> logger) : Hub<
         TenantRlsScope.Set(tenantId);
         try
         {
-            var exists = await db.ProcessedCommands.AnyAsync(c => c.CommandId == ack.CommandId);
-            if (!exists)
+            var row = await db.ProcessedCommands.FirstOrDefaultAsync(c => c.CommandId == ack.CommandId);
+            if (row is null)
             {
                 db.ProcessedCommands.Add(new ProcessedCommand
                 {
                     CommandId = ack.CommandId,
                     AgentUuid = agentUuid,
-                    CreatedAt = DateTimeOffset.UtcNow
+                    CreatedAt = DateTimeOffset.UtcNow,
+                    Success = ack.Success,
+                    Message = ack.Message
                 });
-                await db.SaveChangesAsync();
             }
+            else
+            {
+                row.Success = ack.Success;
+                row.Message = ack.Message;
+            }
+
+            await db.SaveChangesAsync();
         }
         finally
         {

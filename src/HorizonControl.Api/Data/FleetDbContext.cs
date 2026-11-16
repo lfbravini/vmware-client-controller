@@ -11,6 +11,8 @@ public sealed class FleetDbContext(DbContextOptions<FleetDbContext> options) : D
     public DbSet<ManagedInstance> ManagedInstances => Set<ManagedInstance>();
     public DbSet<AuditLog> AuditLogs => Set<AuditLog>();
     public DbSet<ProcessedCommand> ProcessedCommands => Set<ProcessedCommand>();
+    public DbSet<HorizonBroker> HorizonBrokers => Set<HorizonBroker>();
+    public DbSet<BrokerSessionSnapshot> BrokerSessionSnapshots => Set<BrokerSessionSnapshot>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -116,6 +118,39 @@ public sealed class FleetDbContext(DbContextOptions<FleetDbContext> options) : D
             e.Property(x => x.CommandId).HasColumnName("command_id");
             e.Property(x => x.AgentUuid).HasColumnName("agent_uuid");
             e.Property(x => x.CreatedAt).HasColumnName("created_at");
+            e.Property(x => x.Success).HasColumnName("success");
+            e.Property(x => x.Message).HasColumnName("message");
+            e.Property(x => x.InstanceId).HasColumnName("instance_id");
+        });
+
+        modelBuilder.Entity<HorizonBroker>(e =>
+        {
+            e.ToTable("horizon_brokers");
+            e.HasKey(x => x.BrokerId);
+            e.Property(x => x.BrokerId).HasColumnName("broker_id");
+            e.Property(x => x.TenantId).HasColumnName("tenant_id");
+            e.Property(x => x.Name).HasColumnName("name").IsRequired();
+            e.Property(x => x.BaseUrl).HasColumnName("base_url").IsRequired();
+            e.Property(x => x.PublicFqdn).HasColumnName("public_fqdn").IsRequired();
+            e.Property(x => x.EncryptedCredentials).HasColumnName("encrypted_credentials");
+            e.Property(x => x.PollIntervalSec).HasColumnName("poll_interval_sec");
+            e.Property(x => x.LastPollAt).HasColumnName("last_poll_at");
+            e.Property(x => x.LastPollError).HasColumnName("last_poll_error");
+        });
+
+        modelBuilder.Entity<BrokerSessionSnapshot>(e =>
+        {
+            e.ToTable("broker_session_snapshots");
+            e.HasKey(x => x.SnapshotId);
+            e.Property(x => x.SnapshotId).HasColumnName("snapshot_id");
+            e.Property(x => x.TenantId).HasColumnName("tenant_id");
+            e.Property(x => x.BrokerId).HasColumnName("broker_id");
+            e.Property(x => x.SessionId).HasColumnName("session_id").IsRequired();
+            e.Property(x => x.UserName).HasColumnName("user_name");
+            e.Property(x => x.DnsName).HasColumnName("dns_name");
+            e.Property(x => x.BrokerFqdn).HasColumnName("broker_fqdn");
+            e.Property(x => x.ObservedAt).HasColumnName("observed_at");
+            e.HasIndex(x => new { x.BrokerId, x.SessionId });
         });
     }
 }

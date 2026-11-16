@@ -85,4 +85,32 @@ public sealed class ProcessedCommand
     public Guid CommandId { get; set; }
     public Guid AgentUuid { get; set; }
     public DateTimeOffset CreatedAt { get; set; }
+    public bool Success { get; set; } = true;
+    public string? Message { get; set; }
+    public Guid? InstanceId { get; set; }
+}
+
+public sealed class HorizonBroker
+{
+    public Guid BrokerId { get; set; }
+    public Guid TenantId { get; set; }
+    public string Name { get; set; } = string.Empty;
+    public string BaseUrl { get; set; } = string.Empty;
+    public string PublicFqdn { get; set; } = string.Empty;
+    public string EncryptedCredentials { get; set; } = string.Empty;
+    public int PollIntervalSec { get; set; } = 30;
+    public DateTimeOffset? LastPollAt { get; set; }
+    public string? LastPollError { get; set; }
+}
+
+public sealed class BrokerSessionSnapshot
+{
+    public Guid SnapshotId { get; set; }
+    public Guid TenantId { get; set; }
+    public Guid BrokerId { get; set; }
+    public string SessionId { get; set; } = string.Empty;
+    public string? UserName { get; set; }
+    public string? DnsName { get; set; }
+    public string? BrokerFqdn { get; set; }
+    public DateTimeOffset ObservedAt { get; set; }
 }

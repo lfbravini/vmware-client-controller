@@ -1,4 +1,17 @@
-# Lab Setup (V1)
+# Lab Setup (V1+)
+
+## Daily loop (preferred)
+
+From an elevated-capable session on the Windows lab PC:
+
+```powershell
+cd "C:\projects\vmware client controller"
+.\scripts\lab-up.ps1
+```
+
+This builds, pushes images to Portainer, recreates the Git stack, starts agents (UAC once), and runs UC1–UC5. Token: ignored `docs/api.txt`. Edge default: `http://172.16.100.81:18080`.
+
+Pieces: `lab-redeploy.ps1`, `lab-agents.ps1`, `lab-test.ps1`. Agent zip: `.\scripts\Publish-AgentZip.ps1`.
 
 Prepare a Windows PC to deploy and test the Horizon Fleet heal loop against the Portainer control plane (preferred) or local Mode A/B fallbacks.
 

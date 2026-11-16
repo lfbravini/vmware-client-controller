@@ -15,6 +15,23 @@ public sealed class Worker(
 {
     private readonly ConcurrentDictionary<Guid, byte> _seenCommands = new();
     private readonly ConcurrentDictionary<Guid, ManagedInstanceSnapshot> _instances = new();
+    private readonly ConcurrentQueue<DateTimeOffset> _autoRestartTimes = new();
+
+    private bool AllowAutoRestart(int maxPerHour)
+    {
+        if (maxPerHour <= 0)
+        {
+            return true;
+        }
+
+        var cutoff = DateTimeOffset.UtcNow.AddHours(-1);
+        while (_autoRestartTimes.TryPeek(out var t) && t < cutoff)
+        {
+            _autoRestartTimes.TryDequeue(out _);
+        }
+
+        return _autoRestartTimes.Count < maxPerHour;
+    }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
@@ -30,6 +47,23 @@ public sealed class Worker(
         }
 
         controlPlane.CommandReceived += OnCommandAsync;
+        controlPlane.PolicyReceived += async policy =>
+        {
+            try
+            {
+                await pipeServer.SendAsync(new IpcEnvelope
+                {
+                    Type = IpcMessageType.PolicyPush,
+                    CorrelationId = Guid.NewGuid(),
+                    SentAtUtc = DateTimeOffset.UtcNow,
+                    Policy = policy
+                }, CancellationToken.None);
+            }
+            catch (Exception ex)
+            {
+                logger.LogWarning(ex, "Failed to push policy to Tray");
+            }
+        };
         pipeServer.MessageReceived += OnPipeMessageAsync;
         pipeServer.Start();
 
@@ -134,6 +168,15 @@ public sealed class Worker(
                     if (controlPlane.CurrentPolicy.Remediation.AutoRemediate &&
                         message.Degraded.State == ManagedInstanceState.AppHung)
                     {
+                        if (!AllowAutoRestart(controlPlane.CurrentPolicy.Remediation.MaxRestartsPerHour))
+                        {
+                            logger.LogWarning(
+                                "Auto-remediate skipped for {InstanceId}: max_restarts_per_hour exceeded",
+                                message.Degraded.InstanceId);
+                            break;
+                        }
+
+                        _autoRestartTimes.Enqueue(DateTimeOffset.UtcNow);
                         await OnCommandAsync(new AgentCommand
                         {
                             CommandId = Guid.NewGuid(),
