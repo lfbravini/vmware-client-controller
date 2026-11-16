@@ -37,12 +37,15 @@ Requires .NET 8 SDK. CI: [`.github/workflows/build.yml`](.github/workflows/build
 
 ## MVP lab (Caddy + API + Postgres + agent)
 
+Full PC prep and troubleshooting: **[`docs/LAB_SETUP.md`](docs/LAB_SETUP.md)**.
+
 ### Invariants
 
 - Agents reach the **controller over the Internet and/or VPN** (`HORIZON_SERVER` / MSI `SERVER=`). They never need routes to Horizon brokers or Postgres.
-- Edge for MVP is **Caddy only**. Cloudflare Tunnel is a post-MVP option.
+- Edge for MVP is **Caddy only** (Mode A). If Docker engine is not ready after install, use Mode B (local Postgres + API) per LAB_SETUP. Cloudflare Tunnel is a post-MVP option.
 - Prefer **lab HTTP** (or a trusted Caddy CA) so Windows agents do not fail enroll on untrusted HTTPS.
 - Future rename to `horizon-fleet-control` is recommended (path spaces hurt CLI/docker).
+- Non-goals: [`docs/MVP_NON_GOALS.md`](docs/MVP_NON_GOALS.md).
 
 ### 1. Start control plane
 
@@ -91,7 +94,7 @@ Same path: Tray discovers `vmware-view` / `horizon-client`, wraps each root PID 
 - [x] API enroll (hash-only tokens/secrets), heartbeat, AgentHub, admin restart + audit  
 - [x] Service + Tray Job Objects, 3-strike hang, command TTL/dedupe  
 - [x] FakeClient hang harness  
-- [ ] Live lab verification on your machine (compose + agent run)
+- [x] Live lab verification (Mode B: local Postgres + API on :8080; enroll + Job Object admin restart). Mode A Docker engine pending reboot after Desktop install — see [`docs/LAB_SETUP.md`](docs/LAB_SETUP.md).
 
 ## Defaults (change for anything beyond lab)
 
