@@ -1,0 +1,30 @@
+{
+  # Lab: HTTP on :80. For HTTPS lab, enable auto_https and trust Caddy local CA on agents.
+  auto_https off
+}
+
+:80 {
+  # Public agent plane (Internet and/or VPN). App-level agent_secret auth is mandatory.
+  # Stock Caddy image has no rate_limit module; API enforces enroll/agent rate limits.
+  # Production may front this with Cloudflare WAF or a Caddy build that includes rate_limit.
+  handle /api/v1/agent/* {
+    reverse_proxy control-api:8080
+  }
+
+  handle /hubs/agent* {
+    reverse_proxy control-api:8080
+  }
+
+  # Admin / Swagger — restrict in production (VPN/LAN or Cloudflare Access). Lab leaves open.
+  handle /swagger* {
+    reverse_proxy control-api:8080
+  }
+
+  handle /api/v1/admin* {
+    reverse_proxy control-api:8080
+  }
+
+  handle {
+    respond "Horizon Fleet Control edge (Caddy MVP)" 200
+  }
+}

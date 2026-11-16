@@ -1,0 +1,6 @@
+@HorizonControl.Api_HostAddress = http://localhost:5047
+
+GET {{HorizonControl.Api_HostAddress}}/weatherforecast/
+Accept: application/json
+
+###

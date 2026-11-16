@@ -1,0 +1,7 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <RootNamespace>HorizonControl.Shared</RootNamespace>
+    <Description>Shared DTOs, policy models, SignalR and Named Pipe IPC contracts. Linux-safe — no Win32.</Description>
+  </PropertyGroup>
+</Project>
