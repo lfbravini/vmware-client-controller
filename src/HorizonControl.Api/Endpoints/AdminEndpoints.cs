@@ -21,8 +21,133 @@ public static class AdminEndpoints
         group.MapGet("/endpoints", ListEndpointsAsync);
         group.MapGet("/instances", ListInstancesAsync);
         group.MapPost("/instances/restart", RestartInstanceAsync);
+        group.MapGet("/tenants", ListTenantsAsync);
+        group.MapGet("/ous", ListOusAsync);
+        group.MapGet("/enrollment-tokens", ListEnrollmentTokensAsync);
+        group.MapPost("/enrollment-tokens", CreateEnrollmentTokenAsync);
 
         return group;
+    }
+
+    private static async Task<IResult> ListTenantsAsync(FleetDbContext db)
+    {
+        var items = await db.Tenants.AsNoTracking()
+            .OrderBy(t => t.Name)
+            .Select(t => new TenantListItem
+            {
+                TenantId = t.TenantId,
+                Name = t.Name,
+                Slug = t.Slug,
+                Status = t.Status,
+                CreatedAtUtc = t.CreatedAt
+            })
+            .ToListAsync();
+        return Results.Ok(items);
+    }
+
+    private static async Task<IResult> ListOusAsync(FleetDbContext db, [FromQuery] Guid? tenantId)
+    {
+        var query = db.VirtualOus.AsNoTracking().AsQueryable();
+        if (tenantId is { } tid)
+        {
+            query = query.Where(o => o.TenantId == tid);
+        }
+
+        var items = await query
+            .OrderBy(o => o.Path)
+            .Select(o => new VirtualOuListItem
+            {
+                OuId = o.OuId,
+                TenantId = o.TenantId,
+                Name = o.Name,
+                Path = o.Path
+            })
+            .ToListAsync();
+        return Results.Ok(items);
+    }
+
+    private static async Task<IResult> ListEnrollmentTokensAsync(FleetDbContext db, [FromQuery] Guid? tenantId)
+    {
+        var query = db.EnrollmentTokens.AsNoTracking().AsQueryable();
+        if (tenantId is { } tid)
+        {
+            query = query.Where(t => t.TenantId == tid);
+        }
+
+        var items = await query
+            .OrderByDescending(t => t.TokenId)
+            .Select(t => new EnrollmentTokenListItem
+            {
+                TokenId = t.TokenId,
+                TenantId = t.TenantId,
+                OuId = t.OuId,
+                ExpiresAtUtc = t.ExpiresAt,
+                MaxUses = t.MaxUses,
+                UseCount = t.UseCount
+            })
+            .ToListAsync();
+        return Results.Ok(items);
+    }
+
+    private static async Task<IResult> CreateEnrollmentTokenAsync(
+        [FromBody] CreateEnrollmentTokenRequest request,
+        FleetDbContext db)
+    {
+        var tenant = await db.Tenants.FirstOrDefaultAsync(t => t.TenantId == request.TenantId);
+        if (tenant is null)
+        {
+            return Results.BadRequest(new { error = "Unknown tenant." });
+        }
+
+        var ou = await db.VirtualOus.FirstOrDefaultAsync(o =>
+            o.OuId == request.OuId && o.TenantId == request.TenantId);
+        if (ou is null)
+        {
+            return Results.BadRequest(new { error = "Unknown OU for tenant." });
+        }
+
+        var plain = string.IsNullOrWhiteSpace(request.PlainToken)
+            ? Convert.ToHexString(System.Security.Cryptography.RandomNumberGenerator.GetBytes(24))
+            : request.PlainToken.Trim();
+        var hash = SecretHasher.Hash(plain);
+        if (await db.EnrollmentTokens.AnyAsync(t => t.TokenHash == hash))
+        {
+            return Results.Conflict(new { error = "Token hash already exists." });
+        }
+
+        var row = new EnrollmentToken
+        {
+            TokenId = Guid.NewGuid(),
+            TenantId = request.TenantId,
+            OuId = request.OuId,
+            TokenHash = hash,
+            ExpiresAt = request.ExpiresAtUtc,
+            MaxUses = request.MaxUses,
+            UseCount = 0
+        };
+        db.EnrollmentTokens.Add(row);
+        db.AuditLogs.Add(new AuditLog
+        {
+            TenantId = request.TenantId,
+            ActorType = "ADMIN_USER",
+            ActorId = "admin-api-key",
+            Action = "CREATE_ENROLLMENT_TOKEN",
+            TargetType = "ENROLLMENT_TOKEN",
+            TargetId = row.TokenId,
+            MetadataJson = JsonSerializer.Serialize(new { row.OuId, row.MaxUses }),
+            CreatedAt = DateTimeOffset.UtcNow
+        });
+        await db.SaveChangesAsync();
+
+        return Results.Ok(new CreateEnrollmentTokenResponse
+        {
+            TokenId = row.TokenId,
+            TenantId = row.TenantId,
+            OuId = row.OuId,
+            PlainToken = plain,
+            ExpiresAtUtc = row.ExpiresAt,
+            MaxUses = row.MaxUses
+        });
     }
 
     private static async Task<IResult> ListEndpointsAsync(FleetDbContext db)

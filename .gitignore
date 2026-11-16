@@ -37,6 +37,9 @@ build/
 secrets/
 *.pfx
 appsettings.*.local.json
+docs/api.txt
+deploy/lab-run-logs/
+deploy/.lab-elevated-ready.txt
 
 # OS
 Thumbs.db

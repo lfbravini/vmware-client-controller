@@ -55,3 +55,72 @@ public sealed class RestartInstanceResponse
 
     public Guid AgentUuid { get; set; }
 }
+
+public sealed class TenantListItem
+{
+    public Guid TenantId { get; set; }
+
+    public string Name { get; set; } = string.Empty;
+
+    public string Slug { get; set; } = string.Empty;
+
+    public string Status { get; set; } = string.Empty;
+
+    public DateTimeOffset CreatedAtUtc { get; set; }
+}
+
+public sealed class VirtualOuListItem
+{
+    public Guid OuId { get; set; }
+
+    public Guid TenantId { get; set; }
+
+    public string Name { get; set; } = string.Empty;
+
+    public string Path { get; set; } = string.Empty;
+}
+
+public sealed class EnrollmentTokenListItem
+{
+    public Guid TokenId { get; set; }
+
+    public Guid TenantId { get; set; }
+
+    public Guid OuId { get; set; }
+
+    public DateTimeOffset? ExpiresAtUtc { get; set; }
+
+    public int? MaxUses { get; set; }
+
+    public int UseCount { get; set; }
+}
+
+public sealed class CreateEnrollmentTokenRequest
+{
+    public Guid TenantId { get; set; }
+
+    public Guid OuId { get; set; }
+
+    public DateTimeOffset? ExpiresAtUtc { get; set; }
+
+    public int? MaxUses { get; set; }
+
+    /// <summary>Optional plaintext; generated if omitted.</summary>
+    public string? PlainToken { get; set; }
+}
+
+public sealed class CreateEnrollmentTokenResponse
+{
+    public Guid TokenId { get; set; }
+
+    public Guid TenantId { get; set; }
+
+    public Guid OuId { get; set; }
+
+    /// <summary>Shown once at creation; only the hash is stored.</summary>
+    public string PlainToken { get; set; } = string.Empty;
+
+    public DateTimeOffset? ExpiresAtUtc { get; set; }
+
+    public int? MaxUses { get; set; }
+}

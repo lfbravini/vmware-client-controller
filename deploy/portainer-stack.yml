@@ -1,6 +1,6 @@
-# Portainer standalone stack — Horizon Fleet control plane (lab)
+# Portainer standalone stack — Horizon Fleet control plane (V1 lab)
 # Edge: http://172.16.100.81:18080
-# Requires local image: horizon-control-api:lab
+# Requires images: horizon-control-api:lab, horizon-control-web:lab
 
 services:
   caddy:
@@ -31,7 +31,7 @@ services:
             reverse_proxy control-api:8080
           }
           handle {
-            respond "Horizon Fleet Control edge (Portainer lab)" 200
+            reverse_proxy web:80
           }
         }
         EOF
@@ -41,6 +41,11 @@ services:
       - caddy_config:/config
     depends_on:
       - control-api
+      - web
+    restart: unless-stopped
+
+  web:
+    image: horizon-control-web:lab
     restart: unless-stopped
 
   control-api:
@@ -51,6 +56,7 @@ services:
       ConnectionStrings__Default: Host=postgres;Port=5432;Database=horizon_fleet;Username=horizon;Password=horizon_lab
       FleetControl__AdminApiKey: lab-admin-key-change-me
       FleetControl__LabEnrollmentToken: lab-enroll-token-change-me
+      FleetControl__AllowLabDefaults: "true"
     depends_on:
       postgres:
         condition: service_healthy

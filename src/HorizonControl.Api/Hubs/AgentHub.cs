@@ -155,13 +155,39 @@ public sealed class AgentHub(FleetDbContext db, ILogger<AgentHub> logger) : Hub<
 
     public async Task AckCommandAsync(AgentCommandAck ack)
     {
+        var agentUuid = GetAgentUuid();
         logger.LogInformation(
             "Command {CommandId} ack success={Success} replay={Replay} expired={Expired}",
             ack.CommandId,
             ack.Success,
             ack.IgnoredReplay,
             ack.Expired);
-        await Task.CompletedTask;
+
+        if (ack.IgnoredReplay || ack.Expired)
+        {
+            return;
+        }
+
+        var tenantId = GetTenantId();
+        TenantRlsScope.Set(tenantId);
+        try
+        {
+            var exists = await db.ProcessedCommands.AnyAsync(c => c.CommandId == ack.CommandId);
+            if (!exists)
+            {
+                db.ProcessedCommands.Add(new ProcessedCommand
+                {
+                    CommandId = ack.CommandId,
+                    AgentUuid = agentUuid,
+                    CreatedAt = DateTimeOffset.UtcNow
+                });
+                await db.SaveChangesAsync();
+            }
+        }
+        finally
+        {
+            TenantRlsScope.Clear();
+        }
     }
 
     private Guid GetAgentUuid() =>

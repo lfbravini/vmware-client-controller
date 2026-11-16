@@ -41,6 +41,26 @@ builder.Services.AddScoped<DbSeeder>();
 
 var app = builder.Build();
 
+var fleetOpts = app.Services.GetRequiredService<Microsoft.Extensions.Options.IOptions<FleetControlOptions>>().Value;
+if (app.Environment.IsProduction())
+{
+    var usingDefaults =
+        string.Equals(fleetOpts.AdminApiKey, FleetControlOptions.DefaultAdminApiKey, StringComparison.Ordinal) ||
+        string.Equals(fleetOpts.LabEnrollmentToken, FleetControlOptions.DefaultLabEnrollmentToken, StringComparison.Ordinal);
+    if (usingDefaults && !fleetOpts.AllowLabDefaults)
+    {
+        throw new InvalidOperationException(
+            "Production refuses default FleetControl AdminApiKey/LabEnrollmentToken. " +
+            "Set strong secrets or FleetControl__AllowLabDefaults=true for an explicit lab.");
+    }
+
+    if (usingDefaults)
+    {
+        app.Logger.LogWarning(
+            "Production is running with documented lab default secrets (AllowLabDefaults=true). Do not expose this edge to the public Internet.");
+    }
+}
+
 app.UseSwagger();
 app.UseSwaggerUI();
 app.UseAuthentication();

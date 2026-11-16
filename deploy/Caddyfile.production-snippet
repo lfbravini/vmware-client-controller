@@ -1,0 +1,28 @@
+# Production-oriented Caddy fragment: restrict admin UI / swagger / admin API to LAN/VPN.
+# Merge into the :80 (or :443) site block. Keep agent paths open.
+#
+# Replace 10.0.0.0/8 and 172.16.0.0/12 with your VPN/LAN CIDRs.
+
+# handle /api/v1/admin* {
+#   @not_admin {
+#     not remote_ip 10.0.0.0/8 172.16.0.0/12 192.168.0.0/16
+#   }
+#   respond @not_admin "Forbidden" 403
+#   reverse_proxy control-api:8080
+# }
+#
+# handle /swagger* {
+#   @not_admin_sw {
+#     not remote_ip 10.0.0.0/8 172.16.0.0/12 192.168.0.0/16
+#   }
+#   respond @not_admin_sw "Forbidden" 403
+#   reverse_proxy control-api:8080
+# }
+#
+# handle {
+#   @not_admin_ui {
+#     not remote_ip 10.0.0.0/8 172.16.0.0/12 192.168.0.0/16
+#   }
+#   respond @not_admin_ui "Forbidden" 403
+#   reverse_proxy web:80
+# }

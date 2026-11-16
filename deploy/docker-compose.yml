@@ -10,6 +10,13 @@ services:
       - caddy_config:/config
     depends_on:
       - control-api
+      - web
+    restart: unless-stopped
+
+  web:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile.web
     restart: unless-stopped
 
   control-api:
@@ -18,9 +25,11 @@ services:
       dockerfile: deploy/Dockerfile.api
     environment:
       ASPNETCORE_URLS: http://0.0.0.0:8080
+      ASPNETCORE_ENVIRONMENT: Production
       ConnectionStrings__Default: Host=postgres;Port=5432;Database=horizon_fleet;Username=horizon;Password=horizon_lab
       FleetControl__AdminApiKey: lab-admin-key-change-me
       FleetControl__LabEnrollmentToken: lab-enroll-token-change-me
+      FleetControl__AllowLabDefaults: "true"
     depends_on:
       postgres:
         condition: service_healthy

@@ -21,8 +21,9 @@ src/HorizonWatchdog.Service/
 src/HorizonWatchdog.Tray/
 src/HorizonWatchdog.FakeClient/   # Lab hang harness
 src/HorizonWatchdog.Updater/      # Deferred
-src/HorizonControl.Web/           # Deferred
-deploy/                  # Caddy + API + Postgres MVP compose
+src/HorizonControl.Web/           # V1 React admin console
+installer/               # PowerShell Service + Tray install
+deploy/                  # Caddy + API + Web + Postgres (compose / Portainer)
 ```
 
 North star: [`docs/horizon_multi_tenant_fleet_control_plane_master_specification.md`](docs/horizon_multi_tenant_fleet_control_plane_master_specification.md).
